@@ -1,6 +1,6 @@
 """
 Telegram Channel Monitor Bot
-Версия для aiogram 3.3.0
+Исправленная версия для обработки команд
 """
 
 import asyncio
@@ -13,7 +13,7 @@ from typing import Optional, Dict, List, Tuple
 from contextlib import asynccontextmanager
 
 import aiohttp
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import ChatMemberUpdated, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command, ChatMemberUpdatedFilter, CommandObject
 from aiogram.enums import ChatMemberStatus
@@ -299,127 +299,14 @@ def create_message_link(chat_id: int, message_id: int):
         return f"https://t.me/c/{channel_id}/{message_id}"
     return f"https://t.me/c/{chat_id}/{message_id}"
 
-# =================== ОБРАБОТЧИКИ СОБЫТИЙ ===================
-@dp.chat_member()
-async def handle_chat_member_update(event: ChatMemberUpdated):
-    """Обработчик подписок и отписок"""
-    try:
-        # Проверяем, что это наш канал
-        chat = event.chat
-        if not (chat.username == CHANNEL_USERNAME.lstrip('@') or 
-                str(chat.id) == CHANNEL_USERNAME.lstrip('-')):
-            return
-        
-        user = event.new_chat_member.user if event.new_chat_member else event.old_chat_member.user
-        
-        # Игнорируем самого бота
-        if user.id == (await bot.get_me()).id:
-            return
-        
-        # Проверяем статус
-        if event.new_chat_member.status == ChatMemberStatus.MEMBER:
-            # Новый подписчик
-            source = "direct"
-            await db.add_subscriber(user, source)
-            
-            # Отправляем уведомление
-            channel_info = await get_channel_info()
-            total_subs = await db.get_subscribers_count()
-            
-            message_text = (
-                f"🎉 <b>Новый подписчик!</b>\n\n"
-                f"📢 <b>Канал:</b> {channel_info['title'] if channel_info else CHANNEL_USERNAME}\n"
-                f"👤 <b>Пользователь:</b>\n{await format_user_info(user)}\n"
-                f"📈 <b>Всего подписчиков:</b> {total_subs}\n"
-                f"⏰ <b>Время:</b> {datetime.now().strftime('%H:%M:%S')}"
-            )
-            
-            await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
-            
-        elif event.new_chat_member.status == ChatMemberStatus.LEFT:
-            # Пользователь отписался
-            user_info = await db.remove_subscriber(user.id)
-            
-            if user_info:
-                total_subs = await db.get_subscribers_count()
-                
-                message_text = (
-                    "😢 <b>Пользователь отписался</b>\n\n"
-                    f"👤 <b>Пользователь:</b> {user_info['username'] or user_info['first_name']}\n"
-                    f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
-                    f"📉 <b>Осталось подписчиков:</b> {total_subs}"
-                )
-                
-                await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
-                
-    except Exception as e:
-        logger.error(f"Ошибка в обработчике подписок: {e}")
+# =================== ОБРАБОТЧИКИ КОМАНД ===================
+# Эти обработчики должны быть ПЕРВЫМИ в коде!
 
-@dp.message()
-async def handle_all_messages(message: Message):
-    """Обработчик всех сообщений для поиска упоминаний"""
-    try:
-        user = message.from_user
-        
-        # Игнорируем сообщения от бота
-        if not user or user.id == (await bot.get_me()).id:
-            return
-        
-        text = message.text or message.caption or ""
-        
-        # Проверяем упоминание канала
-        if CHANNEL_USERNAME.lower() in text.lower():
-            await db.add_mention(user, message, "mention")
-            
-            message_text = (
-                "🔔 <b>Новое упоминание канала!</b>\n\n"
-                f"👤 <b>От:</b> {await format_user_info(user)}\n"
-                f"💬 <b>Чат:</b> {message.chat.title or 'Без названия'}\n"
-                f"📝 <b>Текст:</b>\n<code>{text[:200]}...</code>\n\n"
-                f"🔗 <a href='{create_message_link(message.chat.id, message.message_id)}'>Перейти к сообщению</a>"
-            )
-            
-            await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
-        
-        # Проверяем репосты
-        if message.forward_from_chat:
-            if (message.forward_from_chat.username == CHANNEL_USERNAME.lstrip('@') or 
-                str(message.forward_from_chat.id) == CHANNEL_USERNAME.lstrip('-')):
-                await db.add_mention(user, message, "forward")
-                
-                message_text = (
-                    "🔄 <b>Репост вашего поста!</b>\n\n"
-                    f"👤 <b>От:</b> {await format_user_info(user)}\n"
-                    f"📢 <b>В:</b> {message.chat.title or 'Без названия'}\n\n"
-                    f"🔗 <a href='{create_message_link(message.chat.id, message.message_id)}'>Посмотреть репост</a>"
-                )
-                
-                await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
-        
-        # Проверяем ответы
-        if message.reply_to_message:
-            reply_msg = message.reply_to_message
-            if reply_msg.forward_from_chat:
-                if (reply_msg.forward_from_chat.username == CHANNEL_USERNAME.lstrip('@') or 
-                    str(reply_msg.forward_from_chat.id) == CHANNEL_USERNAME.lstrip('-')):
-                    await db.add_mention(user, message, "reply")
-                    
-                    message_text = (
-                        "💬 <b>Ответ на ваш пост!</b>\n\n"
-                        f"👤 <b>От:</b> {await format_user_info(user)}\n"
-                        f"💭 <b>Текст ответа:</b>\n<code>{text[:200]}...</code>\n\n"
-                        f"🔗 <a href='{create_message_link(message.chat.id, message.message_id)}'>Перейти к ответу</a>"
-                    )
-                    
-                    await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
-            
-    except Exception as e:
-        logger.error(f"Ошибка в обработчике сообщений: {e}")
-
-# =================== КОМАНДЫ ===================
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     """Команда /start"""
+    logger.info(f"Получена команда /start от {message.from_user.id}")
+    
     if is_admin(message.from_user.id):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
@@ -438,14 +325,55 @@ async def cmd_start(message: Message):
             parse_mode="HTML",
             reply_markup=keyboard
         )
+        logger.info(f"Отправлен ответ на /start для {message.from_user.id}")
     else:
         await message.answer("⚠️ У вас нет доступа к этому боту.")
+        logger.warning(f"Попытка доступа не-админа: {message.from_user.id}")
+
+@dp.message(Command("ping"))
+async def cmd_ping(message: Message):
+    """Команда /ping"""
+    logger.info(f"Получена команда /ping от {message.from_user.id}")
+    
+    if is_admin(message.from_user.id):
+        start_time = datetime.now()
+        
+        channel_info = await get_channel_info()
+        channel_status = "✅" if channel_info else "❌"
+        
+        try:
+            total_subs = await db.get_subscribers_count()
+            db_status = "✅"
+        except:
+            db_status = "❌"
+            total_subs = "Ошибка"
+        
+        end_time = datetime.now()
+        response_time = (end_time - start_time).total_seconds() * 1000
+        
+        ping_text = (
+            f"🏓 <b>PONG!</b>\n\n"
+            f"⏱ <b>Время ответа:</b> {response_time:.0f} мс\n"
+            f"📅 <b>Дата сервера:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+            f"<b>Статус систем:</b>\n"
+            f"{channel_status} Канал: {CHANNEL_USERNAME}\n"
+            f"{db_status} База данных: {total_subs} подписчиков\n"
+            f"✅ Бот активен"
+        )
+        
+        await message.answer(ping_text, parse_mode="HTML")
+        logger.info(f"Отправлен ответ на /ping для {message.from_user.id}")
+    else:
+        await message.answer("❌ Доступ запрещён.")
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
     """Команда /stats"""
+    logger.info(f"Получена команда /stats от {message.from_user.id}")
+    
     if not is_admin(message.from_user.id):
         await message.answer("❌ Доступ запрещён.")
+        logger.warning(f"Попытка доступа к stats не-админа: {message.from_user.id}")
         return
     
     try:
@@ -466,6 +394,7 @@ async def cmd_stats(message: Message):
         )
         
         await message.answer(stats_text, parse_mode="HTML")
+        logger.info(f"Отправлена статистика для {message.from_user.id}")
         
     except Exception as e:
         logger.error(f"Ошибка при получении статистики: {e}")
@@ -474,6 +403,8 @@ async def cmd_stats(message: Message):
 @dp.message(Command("subscribers"))
 async def cmd_subscribers(message: Message):
     """Команда /subscribers"""
+    logger.info(f"Получена команда /subscribers от {message.from_user.id}")
+    
     if not is_admin(message.from_user.id):
         await message.answer("❌ Доступ запрещён.")
         return
@@ -519,6 +450,8 @@ async def cmd_subscribers(message: Message):
 @dp.message(Command("mentions"))
 async def cmd_mentions(message: Message):
     """Команда /mentions"""
+    logger.info(f"Получена команда /mentions от {message.from_user.id}")
+    
     if not is_admin(message.from_user.id):
         await message.answer("❌ Доступ запрещён.")
         return
@@ -570,6 +503,8 @@ async def cmd_mentions(message: Message):
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     """Команда /help"""
+    logger.info(f"Получена команда /help от {message.from_user.id}")
+    
     if is_admin(message.from_user.id):
         help_text = (
             "📚 <b>Помощь по боту</b>\n\n"
@@ -590,36 +525,111 @@ async def cmd_help(message: Message):
     else:
         await message.answer("❌ У вас нет доступа к этому боту.")
 
-@dp.message(Command("ping"))
-async def cmd_ping(message: Message):
-    """Команда /ping"""
-    if is_admin(message.from_user.id):
-        start_time = datetime.now()
+# Обработчик для теста - отвечает на любое сообщение
+@dp.message()
+async def handle_any_message(message: Message):
+    """Обработчик всех сообщений"""
+    logger.info(f"Получено сообщение от {message.from_user.id}: {message.text[:50] if message.text else 'без текста'}")
+    
+    # Если не команда и не админ - игнорируем
+    if not is_admin(message.from_user.id):
+        return
+    
+    # Если админ написал что-то не команду
+    if message.text and not message.text.startswith('/'):
+        await message.answer(f"ℹ️ Для работы с ботом используйте команды:\n"
+                           f"/start - Запуск\n"
+                           f"/stats - Статистика\n"
+                           f"/help - Помощь")
+
+# =================== ОБРАБОТЧИКИ СОБЫТИЙ КАНАЛА ===================
+@dp.chat_member()
+async def handle_chat_member_update(event: ChatMemberUpdated):
+    """Обработчик подписок и отписок"""
+    try:
+        # Проверяем, что это наш канал
+        chat = event.chat
+        if not (chat.username == CHANNEL_USERNAME.lstrip('@') or 
+                str(chat.id) == CHANNEL_USERNAME.lstrip('-')):
+            return
         
-        channel_info = await get_channel_info()
-        channel_status = "✅" if channel_info else "❌"
+        user = event.new_chat_member.user if event.new_chat_member else event.old_chat_member.user
         
-        try:
+        # Игнорируем самого бота
+        if user.id == (await bot.get_me()).id:
+            return
+        
+        # Проверяем статус
+        if event.new_chat_member.status == ChatMemberStatus.MEMBER:
+            # Новый подписчик
+            source = "direct"
+            await db.add_subscriber(user, source)
+            
+            # Отправляем уведомление
+            channel_info = await get_channel_info()
             total_subs = await db.get_subscribers_count()
-            db_status = "✅"
-        except:
-            db_status = "❌"
-            total_subs = "Ошибка"
+            
+            message_text = (
+                f"🎉 <b>Новый подписчик!</b>\n\n"
+                f"📢 <b>Канал:</b> {channel_info['title'] if channel_info else CHANNEL_USERNAME}\n"
+                f"👤 <b>Пользователь:</b>\n{await format_user_info(user)}\n"
+                f"📈 <b>Всего подписчиков:</b> {total_subs}\n"
+                f"⏰ <b>Время:</b> {datetime.now().strftime('%H:%M:%S')}"
+            )
+            
+            await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
+            logger.info(f"Отправлено уведомление о новом подписчике {user.id}")
+            
+        elif event.new_chat_member.status == ChatMemberStatus.LEFT:
+            # Пользователь отписался
+            user_info = await db.remove_subscriber(user.id)
+            
+            if user_info:
+                total_subs = await db.get_subscribers_count()
+                
+                message_text = (
+                    "😢 <b>Пользователь отписался</b>\n\n"
+                    f"👤 <b>Пользователь:</b> {user_info['username'] or user_info['first_name']}\n"
+                    f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
+                    f"📉 <b>Осталось подписчиков:</b> {total_subs}"
+                )
+                
+                await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
+                logger.info(f"Отправлено уведомление об отписке {user.id}")
+                
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике подписок: {e}")
+
+# Отдельный обработчик для упоминаний (чтобы не конфликтовал с командой /start)
+@dp.message(F.text.contains(CHANNEL_USERNAME.lstrip('@')))
+async def handle_mentions(message: Message):
+    """Обработчик упоминаний канала"""
+    try:
+        user = message.from_user
         
-        end_time = datetime.now()
-        response_time = (end_time - start_time).total_seconds() * 1000
+        # Игнорируем сообщения от бота
+        if not user or user.id == (await bot.get_me()).id:
+            return
         
-        ping_text = (
-            f"🏓 <b>PONG!</b>\n\n"
-            f"⏱ <b>Время ответа:</b> {response_time:.0f} мс\n"
-            f"📅 <b>Дата сервера:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-            f"<b>Статус систем:</b>\n"
-            f"{channel_status} Канал: {CHANNEL_USERNAME}\n"
-            f"{db_status} База данных: {total_subs} подписчиков\n"
-            f"✅ Бот активен"
-        )
+        text = message.text or message.caption or ""
         
-        await message.answer(ping_text, parse_mode="HTML")
+        # Проверяем упоминание канала
+        if CHANNEL_USERNAME.lower() in text.lower():
+            await db.add_mention(user, message, "mention")
+            
+            message_text = (
+                "🔔 <b>Новое упоминание канала!</b>\n\n"
+                f"👤 <b>От:</b> {await format_user_info(user)}\n"
+                f"💬 <b>Чат:</b> {message.chat.title or 'Без названия'}\n"
+                f"📝 <b>Текст:</b>\n<code>{text[:200]}...</code>\n\n"
+                f"🔗 <a href='{create_message_link(message.chat.id, message.message_id)}'>Перейти к сообщению</a>"
+            )
+            
+            await bot.send_message(ADMIN_ID, message_text, parse_mode="HTML")
+            logger.info(f"Отправлено уведомление об упоминании от {user.id}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике упоминаний: {e}")
 
 # =================== ЗАПУСК БОТА ===================
 async def main():
@@ -627,48 +637,80 @@ async def main():
     logger.info("=" * 50)
     logger.info("Запуск Telegram Channel Monitor Bot")
     logger.info(f"Канал: {CHANNEL_USERNAME}")
+    logger.info(f"Админ ID: {ADMIN_ID}")
+    logger.info(f"Доп. админы: {ADDITIONAL_ADMINS}")
     logger.info("=" * 50)
     
     # Проверка конфигурации
     if BOT_TOKEN == "ВАШ_ТОКЕН_БОТА_ЗДЕСЬ":
         logger.error("❌ Токен бота не настроен!")
+        print("❌ ОШИБКА: Замените BOT_TOKEN в коде на свой токен!")
         return
     
     if ADMIN_ID == 123456789:
         logger.error("❌ ID администратора не настроен!")
+        print("❌ ОШИБКА: Замените ADMIN_ID в коде на свой Telegram ID!")
         return
+    
+    # Проверяем свои настройки
+    print(f"📢 Настройки бота:")
+    print(f"   Токен: {'Установлен' if BOT_TOKEN != 'ВАШ_ТОКЕН_БОТА_ЗДЕСЬ' else 'НЕ НАСТРОЕН'}")
+    print(f"   Канал: {CHANNEL_USERNAME}")
+    print(f"   Админ ID: {ADMIN_ID}")
     
     # Проверка канала
     try:
         channel_info = await get_channel_info()
         if channel_info:
             logger.info(f"✅ Подключено к каналу: {channel_info['title']}")
+            print(f"✅ Подключено к каналу: {channel_info['title']}")
             
             # Отправляем уведомление о запуске
-            await bot.send_message(
-                ADMIN_ID,
-                f"✅ <b>Бот запущен!</b>\n\n"
-                f"📢 <b>Канал:</b> {channel_info['title']}\n"
-                f"🕐 <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
-                f"📊 <b>Статус:</b> Активен",
-                parse_mode="HTML"
-            )
+            try:
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"✅ <b>Бот запущен!</b>\n\n"
+                    f"📢 <b>Канал:</b> {channel_info['title']}\n"
+                    f"🕐 <b>Время:</b> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+                    f"📊 <b>Статус:</b> Активен\n\n"
+                    f"<i>Напишите /start для начала работы</i>",
+                    parse_mode="HTML"
+                )
+                logger.info(f"Отправлено приветственное сообщение администратору")
+                print(f"✅ Отправлено приветственное сообщение вам в Telegram")
+            except Exception as e:
+                logger.error(f"Не удалось отправить приветственное сообщение: {e}")
+                print(f"⚠️ Не удалось отправить приветственное сообщение: {e}")
         else:
             logger.error(f"❌ Не удалось подключиться к каналу")
+            print(f"❌ Не удалось подключиться к каналу {CHANNEL_USERNAME}")
+            print(f"   Проверьте:")
+            print(f"   1. Существует ли канал {CHANNEL_USERNAME}")
+            print(f"   2. Бот добавлен в канал как администратор")
+            print(f"   3. У бота есть право 'Просматривать участников'")
             return
     except Exception as e:
         logger.error(f"❌ Ошибка при проверке канала: {e}")
+        print(f"❌ Ошибка при проверке канала: {e}")
         return
     
     # Запуск
     logger.info("Бот запущен и готов к работе")
-    await dp.start_polling(bot)
+    print("✅ Бот успешно запущен!")
+    print("📝 Теперь напишите боту в Telegram команду /start")
+    
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"Ошибка при запуске поллинга: {e}")
+        print(f"❌ Ошибка при запуске: {e}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
+        print("\n🛑 Бот остановлен")
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
-
+        print(f"❌ Критическая ошибка: {e}")
