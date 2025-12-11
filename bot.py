@@ -24,9 +24,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # =================== КОНФИГУРАЦИЯ ===================
 # ЗАМЕНИТЕ ЭТИ ЗНАЧЕНИЯ НА СВОИ!
 
-BOT_TOKEN = "ВАШ_ТОКЕН_БОТА_ЗДЕСЬ"  # Получить у @BotFather
-CHANNEL_USERNAME = "@ваш_канал"  # Имя канала с @
-ADMIN_ID = 123456789  # Ваш ID (узнать у @userinfobot)
+BOT_TOKEN = "8184827957:AAFJIn19PtAn2bB1qqi6U3bFarYfoDcWaoc"  # Получить у @BotFather
+CHANNEL_USERNAME = "@dmitriistorik"  # Имя канала с @
+ADMIN_ID = 5775389281  # Ваш ID (узнать у @userinfobot)
 ADDITIONAL_ADMINS = []  # Дополнительные админы
 DATABASE_NAME = "channel_monitor.db"
 LOG_LEVEL = logging.INFO
@@ -671,3 +671,4 @@ if __name__ == "__main__":
         logger.info("Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
+
